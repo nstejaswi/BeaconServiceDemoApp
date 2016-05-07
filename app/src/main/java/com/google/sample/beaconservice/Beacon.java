@@ -146,15 +146,7 @@ public class Beacon implements Parcelable {
    * beacon ID type. For Eddystone this is 3. The %s is the base16 (hex) ASCII for the ID bytes.
    */
   public String getBeaconName() {
-    String uuid = String.format(getHexId());
-    String name = "";
-    if(uuid.equals("edd1ebeac04e5defa017ef03a97390d5"))
-      name = "BlueBerry";
-    else if(uuid.equals("edd1ebeac04e5defa017d5389d59adf1"))
-      name = "Ice";
-
-    return name;
-    //return String.format("beacons/3!%s", getHexId());
+    return String.format("beacons/3!%s", getHexId());
   }
 
   @Nullable

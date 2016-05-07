@@ -75,6 +75,7 @@ public class ManageBeaconFragment extends Fragment {
   private TextView placeId;
   private TextView latLng;
   private ImageView mapView;
+  private ImageView beaconImage;
   private TextView expectedStability;
   private TextView description;
   private Button actionButton;
@@ -124,6 +125,7 @@ public class ManageBeaconFragment extends Fragment {
         editLatLngAction();
       }
     });
+    beaconImage = (ImageView) rootView.findViewById(R.id.beaconimage);
 
     expectedStability = (TextView)rootView.findViewById(R.id.expectedStability);
     expectedStability.setOnClickListener(new View.OnClickListener() {
@@ -466,6 +468,13 @@ public class ManageBeaconFragment extends Fragment {
   private void redraw() {
     advertisedId_Type.setText(beacon.type);
     advertisedId_Id.setText(beacon.getHexId());
+
+    String uuid = String.format(beacon.getHexId());
+
+    if(uuid.equals("edd1ebeac04e5defa018ef03a97390d8"))
+      beaconImage.setImageDrawable(getResources().getDrawable(R.drawable.blueberry));
+    else if(uuid.equals("edd1ebeac04e5defa014d5389d59adf4"))
+      beaconImage.setImageDrawable(getResources().getDrawable(R.drawable.ice));
 
     status.setText(beacon.status);
 

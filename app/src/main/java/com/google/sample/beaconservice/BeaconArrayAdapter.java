@@ -46,7 +46,7 @@ class BeaconArrayAdapter extends ArrayAdapter<Beacon> {
     ImageView registrationStatus = (ImageView) convertView.findViewById(R.id.registrationStatus);
     TextView beaconId = (TextView) convertView.findViewById(R.id.beaconId);
     //beaconId.setText(beacon.getHexId());
-    beaconId.setText(beacon.getBeaconName());
+    beaconId.setText(pickBeacon(String.format(beacon.getHexId())));
 
     switch (beacon.status) {
       case Beacon.UNREGISTERED:
@@ -87,5 +87,15 @@ class BeaconArrayAdapter extends ArrayAdapter<Beacon> {
     }
 
     return convertView;
+  }
+
+  private String pickBeacon(String uuid){
+    String name = "";
+    if(uuid.equals("edd1ebeac04e5defa018ef03a97390d8"))
+      name = "BlueBerry";
+    else if(uuid.equals("edd1ebeac04e5defa014d5389d59adf4"))
+      name = "Ice";
+
+    return name;
   }
 }

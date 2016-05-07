@@ -5,12 +5,27 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
+  <RelativeLayout
+      android:layout_width="match_parent"
+      android:layout_height="match_parent"
+      android:orientation="vertical">
+
+
+    <ImageView
+        android:layout_width="match_parent"
+        android:layout_height="120dp"
+        android:layout_marginBottom="12dip"
+        android:id="@+id/beaconimage"
+        />
+
   <GridLayout
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
       android:alignmentMode="alignBounds"
       android:columnCount="3"
       android:useDefaultMargins="true"
+      android:id="@+id/grid"
+      android:layout_below="@+id/beaconimage"
       >
 
     <TextView
@@ -159,5 +174,11 @@
         />
 
   </GridLayout>
+
+
+
+</RelativeLayout>
+
+
 
 </ScrollView>

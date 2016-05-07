@@ -138,43 +138,45 @@ public class MainActivityFragment extends Fragment {
   }
 
   private void insertIntoListAndFetchStatus(final Beacon beacon) {
-    arrayAdapter.add(beacon);
-    arrayAdapter.sort(RSSI_COMPARATOR);
-    Callback getBeaconCallback = new Callback() {
-      @Override
-      public void onFailure(com.squareup.okhttp.Request request, IOException e) {
-        Log.e(TAG, String.format("Failed request: %s, IOException %s", request, e));
-      }
+      if (beacon != null){
+          arrayAdapter.add(beacon);
+          arrayAdapter.sort(RSSI_COMPARATOR);
+          Callback getBeaconCallback = new Callback() {
+              @Override
+              public void onFailure(com.squareup.okhttp.Request request, IOException e) {
+                  Log.e(TAG, String.format("Failed request: %s, IOException %s", request, e));
+              }
 
-      @Override
-      public void onResponse(com.squareup.okhttp.Response response) throws IOException {
-        Beacon fetchedBeacon;
-        switch (response.code()) {
-          case 200:
-            try {
-              String body = response.body().string();
-              fetchedBeacon = new Beacon(new JSONObject(body));
-            } catch (JSONException e) {
-              Log.e(TAG, "JSONException", e);
-              return;
-            }
-            break;
-          case 403:
-            fetchedBeacon = new Beacon(beacon.type, beacon.id, Beacon.NOT_AUTHORIZED, beacon.rssi);
-            break;
-          case 404:
-            fetchedBeacon = new Beacon(beacon.type, beacon.id, Beacon.UNREGISTERED, beacon.rssi);
-            break;
-          default:
-            Log.e(TAG, "Unhandled beacon service response: " + response);
-            return;
-        }
-        int pos = arrayAdapter.getPosition(beacon);
-        arrayList.set(pos, fetchedBeacon);
-        updateArrayAdapter();
-      }
-    };
-    client.getBeacon(getBeaconCallback, beacon.getBeaconName());
+              @Override
+              public void onResponse(com.squareup.okhttp.Response response) throws IOException {
+                  Beacon fetchedBeacon;
+                  switch (response.code()) {
+                      case 200:
+                          try {
+                              String body = response.body().string();
+                              fetchedBeacon = new Beacon(new JSONObject(body));
+                          } catch (JSONException e) {
+                              Log.e(TAG, "JSONException", e);
+                              return;
+                          }
+                          break;
+                      case 403:
+                          fetchedBeacon = new Beacon(beacon.type, beacon.id, Beacon.NOT_AUTHORIZED, beacon.rssi);
+                          break;
+                      case 404:
+                          fetchedBeacon = new Beacon(beacon.type, beacon.id, Beacon.UNREGISTERED, beacon.rssi);
+                          break;
+                      default:
+                          Log.e(TAG, "Unhandled beacon service response: " + response);
+                          return;
+                  }
+                  int pos = arrayAdapter.getPosition(beacon);
+                  arrayList.set(pos, fetchedBeacon);
+                  updateArrayAdapter();
+              }
+          };
+          client.getBeacon(getBeaconCallback, beacon.getBeaconName());
+    }
   }
 
   private void updateArrayAdapter() {
@@ -215,7 +217,119 @@ public class MainActivityFragment extends Fragment {
     }
   }
 
-  @Override
+    @Override
+    public void onActivityCreated(Bundle savedInstanceState) {
+        super.onActivityCreated(savedInstanceState);
+        client = new ProximityBeaconImpl(getActivity(), accountNameView.getText().toString());
+        //arrayAdapter.clear();
+        Runnable stopScanning;
+        if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            EDDYSTONE_SCAN_FILTER = new ScanFilter.Builder()
+                    .setServiceUuid(EDDYSTONE_SERVICE_UUID)
+                    .build();
+
+            SCAN_FILTERS = buildScanFilters();
+
+            scanCallback = new ScanCallback() {
+                @Override
+                public void onScanResult(int callbackType, ScanResult result) {
+                    ScanRecord scanRecord = result.getScanRecord();
+                    if (scanRecord == null) {
+                        Log.w(TAG, "Null ScanRecord for device " + result.getDevice().getAddress());
+                        return;
+                    }
+
+                    byte[] serviceData = scanRecord.getServiceData(EDDYSTONE_SERVICE_UUID);
+                    if (serviceData == null) {
+                        return;
+                    }
+
+                    // We're only interested in the UID frame time since we need the beacon ID to register.
+                    if (serviceData[0] != EDDYSTONE_UID_FRAME_TYPE) {
+                        return;
+                    }
+
+                    // Extract the beacon ID from the service data. Offset 0 is the frame type, 1 is the
+                    // Tx power, and the next 16 are the ID.
+                    // See https://github.com/google/eddystone/eddystone-uid for more information.
+                    byte[] id = Arrays.copyOfRange(serviceData, 2, 18);
+                    if (arrayListContainsId(arrayList, id)) {
+                        return;
+                    }
+
+                    // Draw it immediately and kick off a async request to fetch the registration status,
+                    // redrawing when the server returns.
+                    Log.i(TAG, "id " + Utils.toHexString(id) + ", rssi " + result.getRssi());
+
+                    Beacon beacon = new Beacon("EDDYSTONE", id, Beacon.STATUS_UNSPECIFIED, result.getRssi());
+                    insertIntoListAndFetchStatus(beacon);
+                }
+
+                @Override
+                public void onScanFailed(int errorCode) {
+                    Log.e(TAG, "onScanFailed errorCode " + errorCode);
+                }
+            };
+
+            SCAN_SETTINGS = new ScanSettings.Builder().
+                    setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+                    .setReportDelay(0)
+                    .build();
+
+            stopScanning = new Runnable() {
+                @Override
+                public void run() {
+                    scanner.stopScan(scanCallback);
+                    Log.i(TAG, "stopped scan");
+                    Utils.setEnabledViews(true, scanButton);
+                }
+            };
+            //scanner.startScan(SCAN_FILTERS, SCAN_SETTINGS, scanCallback);
+            scanner.startScan(scanCallback);
+        } else {
+            leScanCallback = new BluetoothAdapter.LeScanCallback() {
+
+                @Override
+                public void onLeScan(final BluetoothDevice device, int rssi, byte[] scanRecord) {
+                    for (int startByte = 0; startByte < scanRecord.length; startByte++) {
+                        if (scanRecord.length - startByte > 19) { // need at least 19 bytes for Eddystone-UID
+                            // Check that this has the right pattern needed for this to be Eddystone-UID
+                            if (scanRecord[startByte + 0] == (byte) 0xaa && scanRecord[startByte + 1] == (byte) 0xfe &&
+                                    scanRecord[startByte + 2] == (byte) 0x00) {
+                                // This is an Eddystone-UID beacon.
+                                byte[] namespaceIdentifierBytes = Arrays.copyOfRange(scanRecord, startByte + 4, startByte + 14);
+                                byte[] instanceIdentifierBytes = Arrays.copyOfRange(scanRecord, startByte + 14, startByte + 20);
+                                byte[] uuIdentifierBytes = Arrays.copyOfRange(scanRecord, startByte + 4, startByte + 20);
+                                // TODO: do something with the above identifiers here
+                                Beacon beacon = new Beacon("EDDYSTONE", uuIdentifierBytes, Beacon.STATUS_UNSPECIFIED, rssi);
+                                insertIntoListAndFetchStatus(beacon);
+                            }
+                        }
+                    }
+                    //Log.i(TAG, "id " + Utils.toHexString(id) + ", rssi " + rssi);
+                    Log.i(TAG, "uuid " + ", rssi " + rssi);
+
+               /* Beacon beacon = new Beacon("EDDYSTONE", namespaceIdentifierBytes + instanceIdentifierBytes, Beacon.STATUS_UNSPECIFIED, rssi);
+                insertIntoListAndFetchStatus(beacon);*/
+                }
+            };
+
+            stopScanning = new Runnable() {
+                @Override
+                public void run() {
+                    btAdapter.stopLeScan(leScanCallback);
+                    Log.i(TAG, "stopped scan");
+                    Utils.setEnabledViews(true, scanButton);
+                }
+            };
+
+            UUID uuid = UUID.fromString("EDD1EBEA-C04E-5DEF-A017-EF03A97390D9");
+            UUID[] uuids = {uuid};
+            btAdapter.startLeScan(leScanCallback);
+        }
+    }
+
+    @Override
   public void onActivityResult(int requestCode, int resultCode, Intent data) {
     super.onActivityResult(requestCode, resultCode, data);
     if (requestCode == Constants.REQUEST_CODE_PICK_ACCOUNT) {
@@ -259,7 +373,7 @@ public class MainActivityFragment extends Fragment {
       public void onClick(View v) {
         Utils.setEnabledViews(false, scanButton);
         arrayAdapter.clear();
-          Runnable stopScanning;
+        Runnable stopScanning;
         if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             EDDYSTONE_SCAN_FILTER = new ScanFilter.Builder()
                     .setServiceUuid(EDDYSTONE_SERVICE_UUID)
