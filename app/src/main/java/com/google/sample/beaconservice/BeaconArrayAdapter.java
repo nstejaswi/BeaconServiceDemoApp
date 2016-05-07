@@ -45,7 +45,8 @@ class BeaconArrayAdapter extends ArrayAdapter<Beacon> {
     }
     ImageView registrationStatus = (ImageView) convertView.findViewById(R.id.registrationStatus);
     TextView beaconId = (TextView) convertView.findViewById(R.id.beaconId);
-    beaconId.setText(beacon.getHexId());
+    //beaconId.setText(beacon.getHexId());
+    beaconId.setText(beacon.getBeaconName());
 
     switch (beacon.status) {
       case Beacon.UNREGISTERED:

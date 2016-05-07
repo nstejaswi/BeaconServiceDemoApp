@@ -19,6 +19,7 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.Fragment;
 import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.le.BluetoothLeScanner;
 import android.bluetooth.le.ScanCallback;
@@ -32,6 +33,7 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.graphics.PorterDuff;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.CountDownTimer;
 import android.os.Handler;
@@ -61,6 +63,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * The MainActivityFragment is responsible for launching the account picker, ensuring the user has
@@ -75,11 +78,7 @@ public class MainActivityFragment extends Fragment {
   private static final Handler handler = new Handler(Looper.getMainLooper());
 
   // An aggressive scan for nearby devices that reports immediately.
-  private static final ScanSettings SCAN_SETTINGS =
-    new ScanSettings.Builder().
-      setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
-      .setReportDelay(0)
-      .build();
+  private ScanSettings SCAN_SETTINGS;
 
   // The Eddystone-UID frame type byte.
   // See https://github.com/google/eddystone for more information.
@@ -87,16 +86,14 @@ public class MainActivityFragment extends Fragment {
 
   // The Eddystone Service UUID, 0xFEAA.
   private static final ParcelUuid EDDYSTONE_SERVICE_UUID =
-    ParcelUuid.fromString("B9407F30-F5F8-466E-AFF9-25556B57AABB");
+    ParcelUuid.fromString("0000feaa-0000-1000-8000-00805f9b34fb");
 
   // A filter that scans only for devices with the Eddystone Service UUID.
-  private static final ScanFilter EDDYSTONE_SCAN_FILTER = new ScanFilter.Builder()
-    .setServiceUuid(EDDYSTONE_SERVICE_UUID)
-    .build();
+  private ScanFilter EDDYSTONE_SCAN_FILTER;
 
-  private static final List<ScanFilter> SCAN_FILTERS = buildScanFilters();
+  private List<ScanFilter> SCAN_FILTERS;
 
-  private static List<ScanFilter> buildScanFilters() {
+  private List<ScanFilter> buildScanFilters() {
     List<ScanFilter> scanFilters = new ArrayList<>();
     scanFilters.add(EDDYSTONE_SCAN_FILTER);
     return scanFilters;
@@ -113,6 +110,8 @@ public class MainActivityFragment extends Fragment {
   private ArrayList<Beacon> arrayList;
   private BeaconArrayAdapter arrayAdapter;
   private ScanCallback scanCallback;
+  private BluetoothAdapter.LeScanCallback leScanCallback;
+  private BluetoothAdapter btAdapter;
   private BluetoothLeScanner scanner;
   private Button scanButton;
   private TextView accountNameView;
@@ -125,47 +124,6 @@ public class MainActivityFragment extends Fragment {
     sharedPreferences = getActivity().getSharedPreferences(Constants.PREFS_NAME, 0);
     arrayList = new ArrayList<>();
     arrayAdapter = new BeaconArrayAdapter(getActivity(), R.layout.beacon_list_item, arrayList);
-
-    scanCallback = new ScanCallback() {
-      @Override
-      public void onScanResult(int callbackType, ScanResult result) {
-        ScanRecord scanRecord = result.getScanRecord();
-        if (scanRecord == null) {
-          Log.w(TAG, "Null ScanRecord for device " + result.getDevice().getAddress());
-          return;
-        }
-
-        byte[] serviceData = scanRecord.getServiceData(EDDYSTONE_SERVICE_UUID);
-        if (serviceData == null) {
-          return;
-        }
-
-        // We're only interested in the UID frame time since we need the beacon ID to register.
-        if (serviceData[0] != EDDYSTONE_UID_FRAME_TYPE) {
-          return;
-        }
-
-        // Extract the beacon ID from the service data. Offset 0 is the frame type, 1 is the
-        // Tx power, and the next 16 are the ID.
-        // See https://github.com/google/eddystone/eddystone-uid for more information.
-        byte[] id = Arrays.copyOfRange(serviceData, 2, 18);
-        if (arrayListContainsId(arrayList, id)) {
-          return;
-        }
-
-        // Draw it immediately and kick off a async request to fetch the registration status,
-        // redrawing when the server returns.
-        Log.i(TAG, "id " + Utils.toHexString(id) + ", rssi " + result.getRssi());
-
-        Beacon beacon = new Beacon("EDDYSTONE", id, Beacon.STATUS_UNSPECIFIED, result.getRssi());
-        insertIntoListAndFetchStatus(beacon);
-      }
-
-      @Override
-      public void onScanFailed(int errorCode) {
-        Log.e(TAG, "onScanFailed errorCode " + errorCode);
-      }
-    };
 
     createScanner();
   }
@@ -231,7 +189,7 @@ public class MainActivityFragment extends Fragment {
   private void createScanner() {
     BluetoothManager btManager =
       (BluetoothManager)getActivity().getSystemService(Context.BLUETOOTH_SERVICE);
-    BluetoothAdapter btAdapter = btManager.getAdapter();
+    btAdapter = btManager.getAdapter();
     if (btAdapter == null || !btAdapter.isEnabled()) {
       Intent enableBtIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
       startActivityForResult(enableBtIntent, Constants.REQUEST_CODE_ENABLE_BLE);
@@ -241,7 +199,8 @@ public class MainActivityFragment extends Fragment {
       Toast.makeText(getActivity(), "Can't enable Bluetooth", Toast.LENGTH_SHORT).show();
       return;
     }
-    scanner = btAdapter.getBluetoothLeScanner();
+    if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP)
+        scanner = btAdapter.getBluetoothLeScanner();
   }
 
   @Override
@@ -300,7 +259,112 @@ public class MainActivityFragment extends Fragment {
       public void onClick(View v) {
         Utils.setEnabledViews(false, scanButton);
         arrayAdapter.clear();
-        scanner.startScan(SCAN_FILTERS, SCAN_SETTINGS, scanCallback);
+          Runnable stopScanning;
+        if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            EDDYSTONE_SCAN_FILTER = new ScanFilter.Builder()
+                    .setServiceUuid(EDDYSTONE_SERVICE_UUID)
+                    .build();
+
+            SCAN_FILTERS = buildScanFilters();
+
+            scanCallback = new ScanCallback() {
+                @Override
+                public void onScanResult(int callbackType, ScanResult result) {
+                    ScanRecord scanRecord = result.getScanRecord();
+                    if (scanRecord == null) {
+                        Log.w(TAG, "Null ScanRecord for device " + result.getDevice().getAddress());
+                        return;
+                    }
+
+                    byte[] serviceData = scanRecord.getServiceData(EDDYSTONE_SERVICE_UUID);
+                    if (serviceData == null) {
+                        return;
+                    }
+
+                    // We're only interested in the UID frame time since we need the beacon ID to register.
+                    if (serviceData[0] != EDDYSTONE_UID_FRAME_TYPE) {
+                        return;
+                    }
+
+                    // Extract the beacon ID from the service data. Offset 0 is the frame type, 1 is the
+                    // Tx power, and the next 16 are the ID.
+                    // See https://github.com/google/eddystone/eddystone-uid for more information.
+                    byte[] id = Arrays.copyOfRange(serviceData, 2, 18);
+                    if (arrayListContainsId(arrayList, id)) {
+                        return;
+                    }
+
+                    // Draw it immediately and kick off a async request to fetch the registration status,
+                    // redrawing when the server returns.
+                    Log.i(TAG, "id " + Utils.toHexString(id) + ", rssi " + result.getRssi());
+
+                    Beacon beacon = new Beacon("EDDYSTONE", id, Beacon.STATUS_UNSPECIFIED, result.getRssi());
+                    insertIntoListAndFetchStatus(beacon);
+                }
+
+                @Override
+                public void onScanFailed(int errorCode) {
+                    Log.e(TAG, "onScanFailed errorCode " + errorCode);
+                }
+            };
+
+          SCAN_SETTINGS = new ScanSettings.Builder().
+                  setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+                  .setReportDelay(0)
+                  .build();
+
+          stopScanning = new Runnable() {
+                @Override
+                public void run() {
+                    scanner.stopScan(scanCallback);
+                    Log.i(TAG, "stopped scan");
+                    Utils.setEnabledViews(true, scanButton);
+                }
+            };
+          //scanner.startScan(SCAN_FILTERS, SCAN_SETTINGS, scanCallback);
+          scanner.startScan(scanCallback);
+        } else {
+            leScanCallback = new BluetoothAdapter.LeScanCallback() {
+
+            @Override
+            public void onLeScan(final BluetoothDevice device, int rssi, byte[] scanRecord) {
+                for (int startByte = 0; startByte < scanRecord.length; startByte++) {
+                    if (scanRecord.length - startByte > 19) { // need at least 19 bytes for Eddystone-UID
+                        // Check that this has the right pattern needed for this to be Eddystone-UID
+                        if (scanRecord[startByte + 0] == (byte) 0xaa && scanRecord[startByte + 1] == (byte) 0xfe &&
+                                scanRecord[startByte + 2] == (byte) 0x00) {
+                            // This is an Eddystone-UID beacon.
+                            byte[] namespaceIdentifierBytes = Arrays.copyOfRange(scanRecord, startByte + 4, startByte + 14);
+                            byte[] instanceIdentifierBytes = Arrays.copyOfRange(scanRecord, startByte + 14, startByte + 20);
+                            byte[] uuIdentifierBytes = Arrays.copyOfRange(scanRecord, startByte + 4, startByte + 20);
+                            // TODO: do something with the above identifiers here
+                            Beacon beacon = new Beacon("EDDYSTONE", uuIdentifierBytes, Beacon.STATUS_UNSPECIFIED, rssi);
+                            insertIntoListAndFetchStatus(beacon);
+                        }
+                    }
+                }
+                //Log.i(TAG, "id " + Utils.toHexString(id) + ", rssi " + rssi);
+                Log.i(TAG, "uuid " + ", rssi " + rssi);
+
+               /* Beacon beacon = new Beacon("EDDYSTONE", namespaceIdentifierBytes + instanceIdentifierBytes, Beacon.STATUS_UNSPECIFIED, rssi);
+                insertIntoListAndFetchStatus(beacon);*/
+            }
+          };
+
+          stopScanning = new Runnable() {
+                @Override
+                public void run() {
+                    btAdapter.stopLeScan(leScanCallback);
+                    Log.i(TAG, "stopped scan");
+                    Utils.setEnabledViews(true, scanButton);
+                }
+          };
+
+          UUID uuid = UUID.fromString("EDD1EBEA-C04E-5DEF-A017-EF03A97390D9");
+          UUID[] uuids = {uuid};
+          btAdapter.startLeScan(leScanCallback);
+        }
+
         Log.i(TAG, "starting scan");
         client = new ProximityBeaconImpl(getActivity(), accountNameView.getText().toString());
         CountDownTimer countDownTimer = new CountDownTimer(SCAN_TIME_MILLIS, 100) {
@@ -317,14 +381,6 @@ public class MainActivityFragment extends Fragment {
         };
         countDownTimer.start();
 
-        Runnable stopScanning = new Runnable() {
-          @Override
-          public void run() {
-            scanner.stopScan(scanCallback);
-            Log.i(TAG, "stopped scan");
-            Utils.setEnabledViews(true, scanButton);
-          }
-        };
         handler.postDelayed(stopScanning, SCAN_TIME_MILLIS);
       }
     });
@@ -386,4 +442,20 @@ public class MainActivityFragment extends Fragment {
       null, null, accountTypes, false, null, null, null, null);
     startActivityForResult(intent, Constants.REQUEST_CODE_PICK_ACCOUNT);
   }
+
+    /**
+     * bytesToHex method
+     * Found on the internet
+     * http://stackoverflow.com/a/9855338
+     */
+    static final char[] hexArray = "0123456789ABCDEF".toCharArray();
+    private static String bytesToHex(byte[] bytes) {
+        char[] hexChars = new char[bytes.length * 2];
+        for ( int j = 0; j < bytes.length; j++ ) {
+            int v = bytes[j] & 0xFF;
+            hexChars[j * 2] = hexArray[v >>> 4];
+            hexChars[j * 2 + 1] = hexArray[v & 0x0F];
+        }
+        return new String(hexChars);
+    }
 }

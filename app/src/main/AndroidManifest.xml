@@ -27,7 +27,7 @@
     <!-- Required for the Static Maps API used here to display the registered location
          of the beacon -->
     <meta-data android:name="com.google.android.geo.API_KEY"
-               android:value="AIzaSyCa8xRLl3CGQbBi5ZbhJ8g0OaoyYd0zoLc"/>
+               android:value="AIzaSyCt8DprokDuBJyfAlr4spMc11l7QRo7qNQ"/>
     <activity
         android:name=".MainActivity"
         android:screenOrientation="portrait"
